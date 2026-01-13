@@ -436,9 +436,17 @@ async def read_root():
                     <div class="text">${escapeHtml(result.transcription) || 'No transcription available'}</div>
                     <div class="notes-section">
                         <textarea class="notes-input" id="notes-${result.id}" placeholder="Add notes...">${escapeHtml(result.notes || '')}</textarea>
-                        <button class="save-notes-btn" onclick="saveNotes(${result.id}, document.getElementById('notes-${result.id}').value, this)">Save Notes</button>
+                        <button class="save-notes-btn" data-message-id="${result.id}">Save Notes</button>
                     </div>
                 `;
+                
+                // Attach event listener to save button
+                const saveBtn = item.querySelector('.save-notes-btn');
+                const textarea = item.querySelector(`#notes-${result.id}`);
+                saveBtn.addEventListener('click', function() {
+                    saveNotes(result.id, textarea.value, this);
+                });
+                
                 transcriptions.insertBefore(item, transcriptions.firstChild);
             });
             
@@ -480,9 +488,17 @@ async def read_root():
                             <div class="text">${escapeHtml(msg.transcription) || 'No transcription available'}</div>
                             <div class="notes-section">
                                 <textarea class="notes-input" id="notes-${msg.id}" placeholder="Add notes...">${escapeHtml(msg.notes || '')}</textarea>
-                                <button class="save-notes-btn" onclick="saveNotes(${msg.id}, document.getElementById('notes-${msg.id}').value, this)">Save Notes</button>
+                                <button class="save-notes-btn" data-message-id="${msg.id}">Save Notes</button>
                             </div>
                         `;
+                        
+                        // Attach event listener to save button
+                        const saveBtn = item.querySelector('.save-notes-btn');
+                        const textarea = item.querySelector(`#notes-${msg.id}`);
+                        saveBtn.addEventListener('click', function() {
+                            saveNotes(msg.id, textarea.value, this);
+                        });
+                        
                         transcriptions.appendChild(item);
                     });
                 }
@@ -593,7 +609,8 @@ async def update_message_notes(
         }
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update notes: {str(e)}")
+        print(f"Error updating notes for message {message_id}: {str(e)}")  # Log for debugging
+        raise HTTPException(status_code=500, detail="Failed to update notes")
 
 
 @app.get("/api/speakers")
