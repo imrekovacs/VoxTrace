@@ -8,7 +8,7 @@ import io
 from typing import List, Optional
 from datetime import datetime
 import json
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from database import init_db, get_db, Speaker, VoiceMessage
 from processing_pipeline import VoiceProcessingPipeline
@@ -16,7 +16,14 @@ from config import settings
 
 
 class UpdateNotesRequest(BaseModel):
-    notes: str
+    notes: str = ""
+    
+    @field_validator('notes')
+    @classmethod
+    def validate_notes(cls, v: str) -> str:
+        if len(v) > 10000:  # Limit notes to 10,000 characters
+            raise ValueError('Notes must be 10,000 characters or less')
+        return v
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -298,6 +305,17 @@ async def read_root():
             return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
         }
         
+        // Escape HTML to prevent XSS
+        function escapeHtml(unsafe) {
+            if (!unsafe) return '';
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        
         // Save notes for a message
         async function saveNotes(messageId, notes, button) {
             button.disabled = true;
@@ -408,16 +426,16 @@ async def read_root():
                 item.className = 'transcription-item';
                 item.innerHTML = `
                     <div class="meta">
-                        <span>🎤 ${result.speaker_id}</span>
-                        <span>🌐 ${result.language}</span>
+                        <span>🎤 ${escapeHtml(result.speaker_id)}</span>
+                        <span>🌐 ${escapeHtml(result.language)}</span>
                         <span>⏱️ ${result.duration.toFixed(2)}s</span>
                         <span>📊 ${(result.confidence * 100).toFixed(1)}%</span>
                         <span>🕒 ${formatSwissDateTime(result.timestamp)}</span>
                         ${result.is_new_speaker ? '<span style="background: #4caf50; color: white;">🆕 New Speaker</span>' : ''}
                     </div>
-                    <div class="text">${result.transcription || 'No transcription available'}</div>
+                    <div class="text">${escapeHtml(result.transcription) || 'No transcription available'}</div>
                     <div class="notes-section">
-                        <textarea class="notes-input" id="notes-${result.id}" placeholder="Add notes...">${result.notes || ''}</textarea>
+                        <textarea class="notes-input" id="notes-${result.id}" placeholder="Add notes...">${escapeHtml(result.notes || '')}</textarea>
                         <button class="save-notes-btn" onclick="saveNotes(${result.id}, document.getElementById('notes-${result.id}').value, this)">Save Notes</button>
                     </div>
                 `;
@@ -453,15 +471,15 @@ async def read_root():
                         item.className = 'transcription-item';
                         item.innerHTML = `
                             <div class="meta">
-                                <span>🎤 ${msg.speaker_id}</span>
-                                <span>🌐 ${msg.language}</span>
+                                <span>🎤 ${escapeHtml(msg.speaker_id)}</span>
+                                <span>🌐 ${escapeHtml(msg.language)}</span>
                                 <span>⏱️ ${msg.duration.toFixed(2)}s</span>
                                 <span>📊 ${(msg.confidence * 100).toFixed(1)}%</span>
                                 <span>🕒 ${formatSwissDateTime(msg.timestamp)}</span>
                             </div>
-                            <div class="text">${msg.transcription || 'No transcription available'}</div>
+                            <div class="text">${escapeHtml(msg.transcription) || 'No transcription available'}</div>
                             <div class="notes-section">
-                                <textarea class="notes-input" id="notes-${msg.id}" placeholder="Add notes...">${msg.notes || ''}</textarea>
+                                <textarea class="notes-input" id="notes-${msg.id}" placeholder="Add notes...">${escapeHtml(msg.notes || '')}</textarea>
                                 <button class="save-notes-btn" onclick="saveNotes(${msg.id}, document.getElementById('notes-${msg.id}').value, this)">Save Notes</button>
                             </div>
                         `;
@@ -563,15 +581,19 @@ async def update_message_notes(
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
     
-    message.notes = request.notes
-    db.commit()
-    db.refresh(message)
-    
-    return {
-        "status": "success",
-        "message_id": message_id,
-        "notes": message.notes
-    }
+    try:
+        message.notes = request.notes
+        db.commit()
+        db.refresh(message)
+        
+        return {
+            "status": "success",
+            "message_id": message_id,
+            "notes": message.notes
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update notes: {str(e)}")
 
 
 @app.get("/api/speakers")
