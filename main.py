@@ -429,14 +429,20 @@ async def read_root():
         }
         
         // Remove a file from the list
+        // Note: This is attached to window because it's called from inline onclick handlers in the HTML
         window.removeFile = function(index) {
             selectedFiles.splice(index, 1);
             displayFileList();
             
-            // Update file input
-            const dt = new DataTransfer();
-            selectedFiles.forEach(file => dt.items.add(file));
-            fileInput.files = dt.files;
+            // Update file input (if DataTransfer is supported)
+            try {
+                const dt = new DataTransfer();
+                selectedFiles.forEach(file => dt.items.add(file));
+                fileInput.files = dt.files;
+            } catch (e) {
+                // DataTransfer not supported in some browsers, but selectedFiles array is the source of truth
+                console.log('DataTransfer not supported, using selectedFiles array');
+            }
         };
         
         // Handle file selection
