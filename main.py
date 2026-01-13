@@ -8,12 +8,28 @@ import io
 from typing import List, Optional
 from datetime import datetime
 import json
+import logging
+from pydantic import BaseModel, field_validator
 import os
 from pathlib import Path
 
 from database import init_db, get_db, Speaker, VoiceMessage
 from processing_pipeline import VoiceProcessingPipeline
 from config import settings
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+
+class UpdateNotesRequest(BaseModel):
+    notes: str = ""
+    
+    @field_validator('notes')
+    @classmethod
+    def validate_notes(cls, v: str) -> str:
+        if len(v) > 10000:  # Limit notes to 10,000 characters
+            raise ValueError('Notes must be 10,000 characters or less')
+        return v
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -160,6 +176,45 @@ async def read_root():
             font-size: 1.1em;
             color: #333;
             line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        .notes-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #ddd;
+        }
+        .notes-input {
+            width: 100%;
+            min-height: 60px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-family: inherit;
+            font-size: 0.95em;
+            resize: vertical;
+            margin-bottom: 8px;
+        }
+        .notes-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .save-notes-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 6px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.2s;
+        }
+        .save-notes-btn:hover {
+            background: #764ba2;
+        }
+        .save-notes-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
         }
         .audio-controls {
             display: flex;
@@ -281,6 +336,66 @@ async def read_root():
         const uploadStatus = document.getElementById('uploadStatus');
         const transcriptions = document.getElementById('transcriptions');
         
+        // Format timestamp in Swiss format (dd.MM.yyyy HH:mm:ss)
+        function formatSwissDateTime(isoString) {
+            const date = new Date(isoString);
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
+        }
+        
+        // Escape HTML to prevent XSS
+        function escapeHtml(unsafe) {
+            if (!unsafe) return '';
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        
+        // Save notes for a message
+        async function saveNotes(messageId, notes, button) {
+            button.disabled = true;
+            button.textContent = 'Saving...';
+            
+            try {
+                const response = await fetch(`/api/messages/${messageId}/notes`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ notes: notes })
+                });
+                
+                if (response.ok) {
+                    button.textContent = 'Saved ✓';
+                    setTimeout(() => {
+                        button.textContent = 'Save Notes';
+                        button.disabled = false;
+                    }, 2000);
+                } else {
+                    button.textContent = 'Error';
+                    setTimeout(() => {
+                        button.textContent = 'Save Notes';
+                        button.disabled = false;
+                    }, 2000);
+                }
+            } catch (error) {
+                console.error('Error saving notes:', error);
+                button.textContent = 'Error';
+                setTimeout(() => {
+                    button.textContent = 'Save Notes';
+                    button.disabled = false;
+                }, 2000);
+            }
+        }
+        
         // Click to browse
         uploadArea.addEventListener('click', () => fileInput.click());
         
@@ -355,12 +470,17 @@ async def read_root():
                 const messageId = result.id || result.message_id;
                 item.innerHTML = `
                     <div class="meta">
-                        <span>🎤 ${result.speaker_id}</span>
-                        <span>🌐 ${result.language}</span>
+                        <span>🎤 ${escapeHtml(result.speaker_id)}</span>
+                        <span>🌐 ${escapeHtml(result.language)}</span>
                         <span>⏱️ ${result.duration.toFixed(2)}s</span>
                         <span>📊 ${(result.confidence * 100).toFixed(1)}%</span>
+                        <span>🕒 ${formatSwissDateTime(result.timestamp)}</span>
                         ${result.is_new_speaker ? '<span style="background: #4caf50; color: white;">🆕 New Speaker</span>' : ''}
                     </div>
+                    <div class="text">${escapeHtml(result.transcription) || 'No transcription available'}</div>
+                    <div class="notes-section">
+                        <textarea class="notes-input" id="notes-${result.id}" placeholder="Add notes...">${escapeHtml(result.notes || '')}</textarea>
+                        <button class="save-notes-btn" data-message-id="${result.id}">Save Notes</button>
                     <div class="text">${result.transcription || 'No transcription available'}</div>
                     <div class="audio-controls">
                         <audio src="/api/audio/${messageId}" preload="metadata"></audio>
@@ -376,6 +496,14 @@ async def read_root():
                         <span class="time-display">0:00 / ${formatTime(result.duration)}</span>
                     </div>
                 `;
+                
+                // Attach event listener to save button
+                const saveBtn = item.querySelector('.save-notes-btn');
+                const textarea = item.querySelector(`#notes-${result.id}`);
+                saveBtn.addEventListener('click', function() {
+                    saveNotes(result.id, textarea.value, this);
+                });
+                
                 transcriptions.insertBefore(item, transcriptions.firstChild);
                 setupAudioControls(item);
             });
@@ -463,10 +591,16 @@ async def read_root():
                         item.className = 'transcription-item';
                         item.innerHTML = `
                             <div class="meta">
-                                <span>🎤 ${msg.speaker_id}</span>
-                                <span>🌐 ${msg.language}</span>
+                                <span>🎤 ${escapeHtml(msg.speaker_id)}</span>
+                                <span>🌐 ${escapeHtml(msg.language)}</span>
                                 <span>⏱️ ${msg.duration.toFixed(2)}s</span>
                                 <span>📊 ${(msg.confidence * 100).toFixed(1)}%</span>
+                                <span>🕒 ${formatSwissDateTime(msg.timestamp)}</span>
+                            </div>
+                            <div class="text">${escapeHtml(msg.transcription) || 'No transcription available'}</div>
+                            <div class="notes-section">
+                                <textarea class="notes-input" id="notes-${msg.id}" placeholder="Add notes...">${escapeHtml(msg.notes || '')}</textarea>
+                                <button class="save-notes-btn" data-message-id="${msg.id}">Save Notes</button>
                             </div>
                             <div class="text">${msg.transcription || 'No transcription available'}</div>
                             <div class="audio-controls">
@@ -483,6 +617,14 @@ async def read_root():
                                 <span class="time-display">0:00 / ${formatTime(msg.duration)}</span>
                             </div>
                         `;
+                        
+                        // Attach event listener to save button
+                        const saveBtn = item.querySelector('.save-notes-btn');
+                        const textarea = item.querySelector(`#notes-${msg.id}`);
+                        saveBtn.addEventListener('click', function() {
+                            saveNotes(msg.id, textarea.value, this);
+                        });
+                        
                         transcriptions.appendChild(item);
                         setupAudioControls(item);
                     });
@@ -560,11 +702,42 @@ async def get_messages(
                 "transcription": msg.transcription,
                 "duration": msg.duration,
                 "confidence": msg.confidence_score,
-                "timestamp": msg.timestamp.isoformat()
+                "timestamp": msg.timestamp.isoformat(),
+                "notes": msg.notes
             }
             for msg in messages
         ]
     }
+
+
+@app.put("/api/messages/{message_id}/notes")
+async def update_message_notes(
+    message_id: int,
+    request: UpdateNotesRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Update notes for a specific voice message
+    """
+    message = db.query(VoiceMessage).filter(VoiceMessage.id == message_id).first()
+    
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    try:
+        message.notes = request.notes
+        db.commit()
+        db.refresh(message)
+        
+        return {
+            "status": "success",
+            "message_id": message_id,
+            "notes": message.notes
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to update notes for message {message_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update notes")
 
 
 @app.get("/api/speakers")
