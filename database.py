@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, Text, LargeBinary, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, Text, LargeBinary, ForeignKey, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -42,6 +42,24 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 def init_db():
     """Initialize database tables"""
     Base.metadata.create_all(bind=engine)
+    
+    # Add missing columns to existing tables (for migrations)
+    # This handles the case where the model has new columns that don't exist in the database
+    with engine.connect() as conn:
+        # Check if 'notes' column exists in voice_messages table
+        try:
+            # This query works with PostgreSQL (and most SQL databases with information_schema)
+            result = conn.execute(
+                text("SELECT column_name FROM information_schema.columns WHERE table_name='voice_messages' AND column_name='notes'")
+            )
+            if result.fetchone() is None:
+                # Column doesn't exist, add it
+                conn.execute(text("ALTER TABLE voice_messages ADD COLUMN notes TEXT"))
+                conn.commit()
+        except Exception:
+            # If table doesn't exist yet or any other error, create_all already handles table creation
+            # The notes column will be created as part of the table creation
+            pass
 
 
 def get_db():
