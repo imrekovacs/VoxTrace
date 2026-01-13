@@ -280,6 +280,58 @@ async def read_root():
             gap: 10px;
             margin-top: 15px;
         }
+        .file-list {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        .file-list-header {
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1em;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            margin-bottom: 8px;
+            border-left: 3px solid #667eea;
+        }
+        .file-item:last-child {
+            margin-bottom: 0;
+        }
+        .file-info {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .file-name {
+            font-weight: 500;
+            color: #333;
+        }
+        .file-size {
+            font-size: 0.85em;
+            color: #666;
+        }
+        .remove-file-btn {
+            background: #ff5252;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: background 0.2s;
+        }
+        .remove-file-btn:hover {
+            background: #ff1744;
+        }
     </style>
 </head>
 <body>
@@ -314,6 +366,7 @@ async def read_root():
                         <p style="color: #666;">Supported formats: WAV, MP3, FLAC, OGG</p>
                     </div>
                 </div>
+                <div id="fileList" style="margin-top: 15px;"></div>
                 <div class="controls">
                     <button class="btn" id="uploadBtn">Upload & Process</button>
                 </div>
@@ -335,17 +388,18 @@ async def read_root():
         const uploadBtn = document.getElementById('uploadBtn');
         const uploadStatus = document.getElementById('uploadStatus');
         const transcriptions = document.getElementById('transcriptions');
+        const fileListContainer = document.getElementById('fileList');
         
-        // Format timestamp in Swiss format (dd.MM.yyyy HH:mm:ss)
-        function formatSwissDateTime(isoString) {
-            const date = new Date(isoString);
-            const day = String(date.getDate()).padStart(2, '0');
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const year = date.getFullYear();
-            const hours = String(date.getHours()).padStart(2, '0');
-            const minutes = String(date.getMinutes()).padStart(2, '0');
-            const seconds = String(date.getSeconds()).padStart(2, '0');
-            return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
+        // Store selected files
+        let selectedFiles = [];
+        
+        // Format file size
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
         }
         
         // Escape HTML to prevent XSS
@@ -357,6 +411,86 @@ async def read_root():
                 .replace(/>/g, "&gt;")
                 .replace(/"/g, "&quot;")
                 .replace(/'/g, "&#039;");
+        }
+        
+        // Display selected files
+        function displayFileList() {
+            if (selectedFiles.length === 0) {
+                fileListContainer.innerHTML = '';
+                return;
+            }
+            
+            let html = '<div class="file-list">';
+            html += `<div class="file-list-header">📋 Selected Files (${selectedFiles.length})</div>`;
+            
+            selectedFiles.forEach((file, index) => {
+                html += `
+                    <div class="file-item" data-index="${index}">
+                        <div class="file-info">
+                            <div class="file-name">🎵 ${escapeHtml(file.name)}</div>
+                            <div class="file-size">${formatFileSize(file.size)}</div>
+                        </div>
+                        <button class="remove-file-btn" onclick="removeFile(${index})">✕ Remove</button>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            fileListContainer.innerHTML = html;
+        }
+        
+        // Remove a file from the list
+        // Note: This is attached to window because it's called from inline onclick handlers in the HTML
+        window.removeFile = function(index) {
+            selectedFiles.splice(index, 1);
+            displayFileList();
+            
+            // Update file input (if DataTransfer is supported)
+            try {
+                const dt = new DataTransfer();
+                selectedFiles.forEach(file => dt.items.add(file));
+                fileInput.files = dt.files;
+            } catch (e) {
+                // DataTransfer not supported in some browsers, but selectedFiles array is the source of truth
+                console.log('DataTransfer not supported, using selectedFiles array');
+            }
+        };
+        
+        // Handle file selection
+        function handleFileSelection(files) {
+            if (!files || files.length === 0) return;
+            
+            // Convert FileList to Array and add to selectedFiles
+            const newFiles = Array.from(files);
+            selectedFiles = [...selectedFiles, ...newFiles];
+            
+            // Remove duplicates based on name and size
+            const uniqueFiles = [];
+            const seen = new Set();
+            
+            selectedFiles.forEach(file => {
+                const key = `${file.name}-${file.size}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    uniqueFiles.push(file);
+                }
+            });
+            
+            selectedFiles = uniqueFiles;
+            displayFileList();
+            showStatus(`${selectedFiles.length} file(s) selected`, 'info');
+        }
+        
+        // Format timestamp in Swiss format (dd.MM.yyyy HH:mm:ss)
+        function formatSwissDateTime(isoString) {
+            const date = new Date(isoString);
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
         }
         
         // Save notes for a message
@@ -399,6 +533,11 @@ async def read_root():
         // Click to browse
         uploadArea.addEventListener('click', () => fileInput.click());
         
+        // File input change
+        fileInput.addEventListener('change', (e) => {
+            handleFileSelection(e.target.files);
+        });
+        
         // Drag and drop
         uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -412,26 +551,30 @@ async def read_root():
         uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
             uploadArea.style.background = '';
-            fileInput.files = e.dataTransfer.files;
+            handleFileSelection(e.dataTransfer.files);
         });
         
         // Upload button
         uploadBtn.addEventListener('click', async () => {
-            const files = fileInput.files;
-            if (files.length === 0) {
+            if (selectedFiles.length === 0) {
                 showStatus('Please select audio files first', 'error');
                 return;
             }
             
             uploadBtn.disabled = true;
-            showStatus('Processing audio files...', 'info');
+            showStatus(`Processing ${selectedFiles.length} file(s)...`, 'info');
             
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
+            let successCount = 0;
+            let errorCount = 0;
+            
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i];
                 const formData = new FormData();
                 formData.append('file', file);
                 
                 try {
+                    showStatus(`Processing ${i + 1}/${selectedFiles.length}: ${file.name}...`, 'info');
+                    
                     const response = await fetch('/api/process-audio', {
                         method: 'POST',
                         body: formData
@@ -440,18 +583,36 @@ async def read_root():
                     const data = await response.json();
                     
                     if (response.ok) {
-                        showStatus(`Processed ${i + 1}/${files.length} files`, 'success');
-                        addTranscriptions(data.results);
+                        successCount++;
+                        if (data.results && data.results.length > 0) {
+                            showStatus(`✅ Processed ${i + 1}/${selectedFiles.length}: ${file.name} (${data.results.length} segment(s) found)`, 'success');
+                            addTranscriptions(data.results);
+                        } else {
+                            showStatus(`⚠️ Processed ${i + 1}/${selectedFiles.length}: ${file.name} (no speech segments detected)`, 'info');
+                        }
                     } else {
-                        showStatus(`Error processing ${file.name}: ${data.detail}`, 'error');
+                        errorCount++;
+                        showStatus(`❌ Error processing ${file.name}: ${data.detail}`, 'error');
                     }
                 } catch (error) {
-                    showStatus(`Error: ${error.message}`, 'error');
+                    errorCount++;
+                    showStatus(`❌ Error processing ${file.name}: ${error.message}`, 'error');
                 }
             }
             
+            // Final summary
+            if (errorCount === 0) {
+                showStatus(`✅ Successfully processed all ${successCount} file(s)`, 'success');
+            } else if (successCount > 0) {
+                showStatus(`⚠️ Processed ${successCount} file(s), ${errorCount} failed`, 'info');
+            } else {
+                showStatus(`❌ All ${errorCount} file(s) failed to process`, 'error');
+            }
+            
             uploadBtn.disabled = false;
+            selectedFiles = [];
             fileInput.value = '';
+            displayFileList();
             loadStats();
         });
         
