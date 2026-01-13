@@ -8,11 +8,15 @@ import io
 from typing import List, Optional
 from datetime import datetime
 import json
+import logging
 from pydantic import BaseModel, field_validator
 
 from database import init_db, get_db, Speaker, VoiceMessage
 from processing_pipeline import VoiceProcessingPipeline
 from config import settings
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class UpdateNotesRequest(BaseModel):
@@ -609,7 +613,7 @@ async def update_message_notes(
         }
     except Exception as e:
         db.rollback()
-        print(f"Error updating notes for message {message_id}: {str(e)}")  # Log for debugging
+        logger.error(f"Failed to update notes for message {message_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to update notes")
 
 
