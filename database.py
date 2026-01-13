@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, Text, LargeBinary, ForeignKey, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.exc import ProgrammingError, OperationalError
 from datetime import datetime
 from config import settings
 
@@ -53,11 +54,11 @@ def init_db():
                 text("SELECT column_name FROM information_schema.columns WHERE table_name='voice_messages' AND column_name='notes'")
             )
             if result.fetchone() is None:
-                # Column doesn't exist, add it
-                conn.execute(text("ALTER TABLE voice_messages ADD COLUMN notes TEXT"))
-                conn.commit()
-        except Exception:
-            # If table doesn't exist yet or any other error, create_all already handles table creation
+                # Column doesn't exist, add it using a transaction
+                with conn.begin():
+                    conn.execute(text("ALTER TABLE voice_messages ADD COLUMN notes TEXT"))
+        except (ProgrammingError, OperationalError):
+            # If table doesn't exist yet or any other database error, create_all already handles table creation
             # The notes column will be created as part of the table creation
             pass
 
