@@ -29,6 +29,7 @@ class VoiceMessage(Base):
     transcription = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
     confidence_score = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)  # Editable notes field
     
     speaker = relationship("Speaker", back_populates="voice_messages")
 

@@ -8,10 +8,15 @@ import io
 from typing import List, Optional
 from datetime import datetime
 import json
+from pydantic import BaseModel
 
 from database import init_db, get_db, Speaker, VoiceMessage
 from processing_pipeline import VoiceProcessingPipeline
 from config import settings
+
+
+class UpdateNotesRequest(BaseModel):
+    notes: str
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -158,6 +163,45 @@ async def read_root():
             font-size: 1.1em;
             color: #333;
             line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        .notes-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #ddd;
+        }
+        .notes-input {
+            width: 100%;
+            min-height: 60px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-family: inherit;
+            font-size: 0.95em;
+            resize: vertical;
+            margin-bottom: 8px;
+        }
+        .notes-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .save-notes-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 6px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.2s;
+        }
+        .save-notes-btn:hover {
+            background: #764ba2;
+        }
+        .save-notes-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
         }
         .stats {
             display: grid;
@@ -242,6 +286,55 @@ async def read_root():
         const uploadStatus = document.getElementById('uploadStatus');
         const transcriptions = document.getElementById('transcriptions');
         
+        // Format timestamp in Swiss format (dd.MM.yyyy HH:mm:ss)
+        function formatSwissDateTime(isoString) {
+            const date = new Date(isoString);
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
+        }
+        
+        // Save notes for a message
+        async function saveNotes(messageId, notes, button) {
+            button.disabled = true;
+            button.textContent = 'Saving...';
+            
+            try {
+                const response = await fetch(`/api/messages/${messageId}/notes`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ notes: notes })
+                });
+                
+                if (response.ok) {
+                    button.textContent = 'Saved ✓';
+                    setTimeout(() => {
+                        button.textContent = 'Save Notes';
+                        button.disabled = false;
+                    }, 2000);
+                } else {
+                    button.textContent = 'Error';
+                    setTimeout(() => {
+                        button.textContent = 'Save Notes';
+                        button.disabled = false;
+                    }, 2000);
+                }
+            } catch (error) {
+                console.error('Error saving notes:', error);
+                button.textContent = 'Error';
+                setTimeout(() => {
+                    button.textContent = 'Save Notes';
+                    button.disabled = false;
+                }, 2000);
+            }
+        }
+        
         // Click to browse
         uploadArea.addEventListener('click', () => fileInput.click());
         
@@ -319,9 +412,14 @@ async def read_root():
                         <span>🌐 ${result.language}</span>
                         <span>⏱️ ${result.duration.toFixed(2)}s</span>
                         <span>📊 ${(result.confidence * 100).toFixed(1)}%</span>
+                        <span>🕒 ${formatSwissDateTime(result.timestamp)}</span>
                         ${result.is_new_speaker ? '<span style="background: #4caf50; color: white;">🆕 New Speaker</span>' : ''}
                     </div>
                     <div class="text">${result.transcription || 'No transcription available'}</div>
+                    <div class="notes-section">
+                        <textarea class="notes-input" id="notes-${result.id}" placeholder="Add notes...">${result.notes || ''}</textarea>
+                        <button class="save-notes-btn" onclick="saveNotes(${result.id}, document.getElementById('notes-${result.id}').value, this)">Save Notes</button>
+                    </div>
                 `;
                 transcriptions.insertBefore(item, transcriptions.firstChild);
             });
@@ -359,8 +457,13 @@ async def read_root():
                                 <span>🌐 ${msg.language}</span>
                                 <span>⏱️ ${msg.duration.toFixed(2)}s</span>
                                 <span>📊 ${(msg.confidence * 100).toFixed(1)}%</span>
+                                <span>🕒 ${formatSwissDateTime(msg.timestamp)}</span>
                             </div>
                             <div class="text">${msg.transcription || 'No transcription available'}</div>
+                            <div class="notes-section">
+                                <textarea class="notes-input" id="notes-${msg.id}" placeholder="Add notes...">${msg.notes || ''}</textarea>
+                                <button class="save-notes-btn" onclick="saveNotes(${msg.id}, document.getElementById('notes-${msg.id}').value, this)">Save Notes</button>
+                            </div>
                         `;
                         transcriptions.appendChild(item);
                     });
@@ -438,10 +541,36 @@ async def get_messages(
                 "transcription": msg.transcription,
                 "duration": msg.duration,
                 "confidence": msg.confidence_score,
-                "timestamp": msg.timestamp.isoformat()
+                "timestamp": msg.timestamp.isoformat(),
+                "notes": msg.notes
             }
             for msg in messages
         ]
+    }
+
+
+@app.put("/api/messages/{message_id}/notes")
+async def update_message_notes(
+    message_id: int,
+    request: UpdateNotesRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Update notes for a specific voice message
+    """
+    message = db.query(VoiceMessage).filter(VoiceMessage.id == message_id).first()
+    
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    message.notes = request.notes
+    db.commit()
+    db.refresh(message)
+    
+    return {
+        "status": "success",
+        "message_id": message_id,
+        "notes": message.notes
     }
 
 
