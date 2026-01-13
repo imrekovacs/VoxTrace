@@ -54,8 +54,8 @@ def init_db():
                 text("SELECT column_name FROM information_schema.columns WHERE table_name='voice_messages' AND column_name='notes'")
             )
             if result.fetchone() is None:
-                # Column doesn't exist, add it
-                conn.execute(text("ALTER TABLE voice_messages ADD COLUMN notes TEXT"))
+                # Column doesn't exist, add it with explicit NULL constraint
+                conn.execute(text("ALTER TABLE voice_messages ADD COLUMN notes TEXT NULL"))
     except (ProgrammingError, OperationalError):
         # If table doesn't exist yet or any other database error, create_all already handles table creation
         # The notes column will be created as part of the table creation
