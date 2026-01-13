@@ -1,5 +1,5 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Depends, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 import numpy as np
@@ -10,6 +10,8 @@ from datetime import datetime
 import json
 import logging
 from pydantic import BaseModel, field_validator
+import os
+from pathlib import Path
 
 from database import init_db, get_db, Speaker, VoiceMessage
 from processing_pipeline import VoiceProcessingPipeline
@@ -213,6 +215,43 @@ async def read_root():
             opacity: 0.5;
             cursor: not-allowed;
         }
+        }
+        .audio-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+        }
+        .audio-controls audio {
+            display: none;
+        }
+        .control-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .control-btn:hover {
+            background: #764ba2;
+        }
+        .control-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .time-display {
+            font-size: 0.9em;
+            color: #666;
+            min-width: 100px;
         }
         .stats {
             display: grid;
@@ -428,6 +467,7 @@ async def read_root():
             results.forEach(result => {
                 const item = document.createElement('div');
                 item.className = 'transcription-item';
+                const messageId = result.id || result.message_id;
                 item.innerHTML = `
                     <div class="meta">
                         <span>🎤 ${escapeHtml(result.speaker_id)}</span>
@@ -441,6 +481,19 @@ async def read_root():
                     <div class="notes-section">
                         <textarea class="notes-input" id="notes-${result.id}" placeholder="Add notes...">${escapeHtml(result.notes || '')}</textarea>
                         <button class="save-notes-btn" data-message-id="${result.id}">Save Notes</button>
+                    <div class="text">${result.transcription || 'No transcription available'}</div>
+                    <div class="audio-controls">
+                        <audio src="/api/audio/${messageId}" preload="metadata"></audio>
+                        <button class="control-btn play-btn" data-message-id="${messageId}">
+                            ▶️ Play
+                        </button>
+                        <button class="control-btn pause-btn" data-message-id="${messageId}" style="display: none;">
+                            ⏸️ Pause
+                        </button>
+                        <button class="control-btn stop-btn" data-message-id="${messageId}" disabled>
+                            ⏹️ Stop
+                        </button>
+                        <span class="time-display">0:00 / ${formatTime(result.duration)}</span>
                     </div>
                 `;
                 
@@ -452,11 +505,66 @@ async def read_root():
                 });
                 
                 transcriptions.insertBefore(item, transcriptions.firstChild);
+                setupAudioControls(item);
             });
             
             // Remove placeholder
             const placeholder = transcriptions.querySelector('p');
             if (placeholder) placeholder.remove();
+        }
+        
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+        
+        function setupAudioControls(item) {
+            const audio = item.querySelector('audio');
+            const playBtn = item.querySelector('.play-btn');
+            const pauseBtn = item.querySelector('.pause-btn');
+            const stopBtn = item.querySelector('.stop-btn');
+            const timeDisplay = item.querySelector('.time-display');
+            
+            playBtn.addEventListener('click', () => {
+                audio.play().catch(error => {
+                    console.error('Error playing audio:', error);
+                    alert('Failed to play audio. The file may be unavailable.');
+                    playBtn.style.display = 'flex';
+                    pauseBtn.style.display = 'none';
+                    stopBtn.disabled = true;
+                });
+                playBtn.style.display = 'none';
+                pauseBtn.style.display = 'flex';
+                stopBtn.disabled = false;
+            });
+            
+            pauseBtn.addEventListener('click', () => {
+                audio.pause();
+                pauseBtn.style.display = 'none';
+                playBtn.style.display = 'flex';
+            });
+            
+            stopBtn.addEventListener('click', () => {
+                audio.pause();
+                audio.currentTime = 0;
+                pauseBtn.style.display = 'none';
+                playBtn.style.display = 'flex';
+                stopBtn.disabled = true;
+            });
+            
+            audio.addEventListener('timeupdate', () => {
+                const current = formatTime(audio.currentTime);
+                const total = formatTime(audio.duration || 0);
+                timeDisplay.textContent = `${current} / ${total}`;
+            });
+            
+            audio.addEventListener('ended', () => {
+                pauseBtn.style.display = 'none';
+                playBtn.style.display = 'flex';
+                stopBtn.disabled = true;
+                audio.currentTime = 0;
+            });
         }
         
         async function loadStats() {
@@ -494,6 +602,20 @@ async def read_root():
                                 <textarea class="notes-input" id="notes-${msg.id}" placeholder="Add notes...">${escapeHtml(msg.notes || '')}</textarea>
                                 <button class="save-notes-btn" data-message-id="${msg.id}">Save Notes</button>
                             </div>
+                            <div class="text">${msg.transcription || 'No transcription available'}</div>
+                            <div class="audio-controls">
+                                <audio src="/api/audio/${msg.id}" preload="metadata"></audio>
+                                <button class="control-btn play-btn" data-message-id="${msg.id}">
+                                    ▶️ Play
+                                </button>
+                                <button class="control-btn pause-btn" data-message-id="${msg.id}" style="display: none;">
+                                    ⏸️ Pause
+                                </button>
+                                <button class="control-btn stop-btn" data-message-id="${msg.id}" disabled>
+                                    ⏹️ Stop
+                                </button>
+                                <span class="time-display">0:00 / ${formatTime(msg.duration)}</span>
+                            </div>
                         `;
                         
                         // Attach event listener to save button
@@ -504,6 +626,7 @@ async def read_root():
                         });
                         
                         transcriptions.appendChild(item);
+                        setupAudioControls(item);
                     });
                 }
             } catch (error) {
@@ -655,6 +778,28 @@ async def get_stats(db: Session = Depends(get_db)):
         "total_speakers": total_speakers,
         "unique_languages": unique_languages
     }
+
+
+@app.get("/api/audio/{message_id}")
+async def get_audio(message_id: int, db: Session = Depends(get_db)):
+    """
+    Serve audio file for a specific message
+    """
+    message = db.query(VoiceMessage).filter(VoiceMessage.id == message_id).first()
+    
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    audio_path = Path(message.audio_file_path)
+    
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    
+    return FileResponse(
+        path=str(audio_path),
+        media_type="audio/wav",
+        filename=f"message_{message_id}.wav"
+    )
 
 
 @app.websocket("/ws/audio")
