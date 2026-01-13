@@ -481,7 +481,7 @@ async def read_root():
                     <div class="notes-section">
                         <textarea class="notes-input" id="notes-${result.id}" placeholder="Add notes...">${escapeHtml(result.notes || '')}</textarea>
                         <button class="save-notes-btn" data-message-id="${result.id}">Save Notes</button>
-                    <div class="text">${result.transcription || 'No transcription available'}</div>
+                    </div>
                     <div class="audio-controls">
                         <audio src="/api/audio/${messageId}" preload="metadata"></audio>
                         <button class="control-btn play-btn" data-message-id="${messageId}">
@@ -602,7 +602,6 @@ async def read_root():
                                 <textarea class="notes-input" id="notes-${msg.id}" placeholder="Add notes...">${escapeHtml(msg.notes || '')}</textarea>
                                 <button class="save-notes-btn" data-message-id="${msg.id}">Save Notes</button>
                             </div>
-                            <div class="text">${msg.transcription || 'No transcription available'}</div>
                             <div class="audio-controls">
                                 <audio src="/api/audio/${msg.id}" preload="metadata"></audio>
                                 <button class="control-btn play-btn" data-message-id="${msg.id}">
