@@ -399,7 +399,13 @@ async def read_root():
             const timeDisplay = item.querySelector('.time-display');
             
             playBtn.addEventListener('click', () => {
-                audio.play();
+                audio.play().catch(error => {
+                    console.error('Error playing audio:', error);
+                    alert('Failed to play audio. The file may be unavailable.');
+                    playBtn.style.display = 'flex';
+                    pauseBtn.style.display = 'none';
+                    stopBtn.disabled = true;
+                });
                 playBtn.style.display = 'none';
                 pauseBtn.style.display = 'flex';
                 stopBtn.disabled = false;
